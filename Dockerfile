@@ -53,7 +53,7 @@ port=0
 # Define the DHCP range, lease time, and router/DNS options
 dhcp-range=${DHCP_RANGE_START},${DHCP_RANGE_END},12h
 dhcp-option=option:router,${LAN_IP}
-dhcp-option=option:dns-server,8.8.8.8,8.8.4.4
+dhcp-option=option:dns-server,9.9.9.9,8.8.4.4
 # Enable DHCP logging
 log-dhcp
 EOF
@@ -88,6 +88,7 @@ nic-${WAN_IF}
 user "${PPPOE_USERNAME}"
 noipdefault
 defaultroute
+replacedefaultroute
 usepeerdns
 persist
 nodetach
@@ -102,6 +103,8 @@ novj
 noccp
 lcp-echo-interval 10
 lcp-echo-failure 4
+debug
+dump
 EOF
 
 echo ">> Enabling IP forwarding..."
@@ -113,11 +116,19 @@ iptables -t nat -F
 iptables -t mangle -F
 
 
-echo ">> Setting up IPTables for NAT (Masquerade)..."
-# NOTE: Using the dynamically calculated LAN_SUBNET_CIDR
-iptables -A FORWARD -i "${LAN_IF}" -o ppp0 -j ACCEPT
-iptables -A FORWARD -i ppp0 -o "${LAN_IF}" -m state --state RELATED,ESTABLISHED -j ACCEPT
-iptables -t nat -A POSTROUTING -s "${LAN_SUBNET_CIDR}" -o ppp0 -j MASQUERADE
+echo ">> Creating ip-up script for pppd..."
+cat > /etc/ppp/ip-up <<EOF
+#!/bin/sh
+# This script is executed when the ppp connection is established.
+# $1 is the interface name, e.g. ppp0
+
+echo "ip-up script called for \$1" >> /tmp/ip-up.log
+
+/usr/sbin/iptables -A FORWARD -i "${LAN_IF}" -o \$1 -j ACCEPT
+/usr/sbin/iptables -A FORWARD -i \$1 -o "${LAN_IF}" -m state --state RELATED,ESTABLISHED -j ACCEPT
+/usr/sbin/iptables -t nat -A POSTROUTING -s "${LAN_SUBNET_CIDR}" -o \$1 -j MASQUERADE
+EOF
+chmod +x /etc/ppp/ip-up
 
 # The host machine needs to have an IP on the LAN interface for dnsmasq to bind to.
 # Let's ensure the LAN_IF is up and has the correct IP.
